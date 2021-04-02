@@ -2,13 +2,13 @@ class Things {
   objectLookup() {
     let chancancode = Person.create({ firstName: 'Godfrey', lastName: 'Chan' });
 
-    chancancode.get('fullName');
+    chancancode.fullName;
   }
 
   modelLookup() {
     let model = Person.create({ firstName: 'Godfrey', lastName: 'Chan' });
 
-    model.get('fullName');
+    model.fullName;
   }
 
   routeLookup() {

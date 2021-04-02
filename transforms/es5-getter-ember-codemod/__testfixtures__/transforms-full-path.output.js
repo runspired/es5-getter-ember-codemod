@@ -1,5 +1,5 @@
-this.get('foo.bar.baz');
+this.foo?.bar?.baz;
 
 let model = Object.create({foo: { bar: 'baz' }});
 
-model.get('foo.bar');
+model.foo?.bar;

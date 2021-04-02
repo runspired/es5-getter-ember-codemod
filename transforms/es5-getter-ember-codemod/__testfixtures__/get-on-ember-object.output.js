@@ -1,10 +1,10 @@
 let chancancode = Person.create({ firstName: 'Godfrey', lastName: 'Chan' });
 
-chancancode.get('fullName');
+chancancode.fullName;
 
 let model = Person.create({ firstName: 'Godfrey', lastName: 'Chan' });
 
-model.get('fullName');
+model.fullName;
 
 let route = Person.create({ firstName: 'Godfrey', lastName: 'Chan' });
 

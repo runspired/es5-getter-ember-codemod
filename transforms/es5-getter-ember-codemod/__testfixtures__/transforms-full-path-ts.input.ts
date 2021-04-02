@@ -1,5 +1,5 @@
 class Thing {
-  doesNotTransform() {
+  transforms() {
     this.get('foo.bar.baz');
 
     let model = Object.create({ foo: { bar: 'baz' } });
