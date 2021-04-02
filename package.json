@@ -13,7 +13,7 @@
   ],
   "license": "ISC",
   "dependencies": {
-    "codemod-cli": "^2.1.0"
+    "codemod-cli": "runspired/codemod-cli#master"
   },
   "devDependencies": {
     "jest": "^23.1.0"
