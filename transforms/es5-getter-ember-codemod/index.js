@@ -104,6 +104,31 @@ module.exports = function transformer(file, api) {
     return { definition, thisProps };
   }
 
+  function isRoute() {
+    // not definitive obvs but a pre-req
+    if (file.path.includes('route')) {
+      let nodes = root.find(j.ImportDeclaration, {
+        source: {
+          value: '@ember/route/routing',
+        }
+      });
+      return nodes.length > 0;
+    }
+    return false;
+  }
+
+  function isController() {
+    if (file.path.includes('controller')) {
+      let nodes = root.find(j.ImportDeclaration, {
+        source: {
+          value: '@ember/controller',
+        }
+      });
+      return nodes.length > 0;
+    }
+    return false;
+  }
+
   function isNestedKey(key) {
     return key.indexOf('.') !== -1;
   }
@@ -123,7 +148,7 @@ module.exports = function transformer(file, api) {
     return base;
   }
 
-  function performReplacement(path, keyIndex, object, knownObjProps = {}) {
+  function performReplacement(path, keyIndex, object, knownObjProps) {
     let keyNode = path.node.arguments[keyIndex];
 
     if (keyNode.type !== 'StringLiteral' && keyNode.type !== 'Literal') {
@@ -141,20 +166,21 @@ module.exports = function transformer(file, api) {
         return;
       }
 
-      if ((!knownObjProps[key1] || pathParts.length) && !PROP_ALLOW_LIST.has(key1)) {
+      if ((!knownObjProps || !knownObjProps[key1] || pathParts.length) && !PROP_ALLOW_LIST.has(key1)) {
+        console.log(Object.keys(knownObjProps || {}));
+        if (
+          (pathParts.length === 0 && object.type === 'ThisExpression') &&
+          (
+            (isRoute() && key1 === 'controller') ||
+            (isController() && key1 === 'model')
+          )
+        ) {
+          path.replace(buildChainMember(object, [key1, key2]));
+        }
         return;
       }
 
-      let firstKey = isValidIdentifier(key1)
-        ? j.memberExpression(object, j.identifier(key1))
-        : j.memberExpression(object,j.stringLiteral(key1), true);
-
-      let replacement = isValidIdentifier(key2)
-        ? j.memberExpression(firstKey, j.identifier(key2))
-        : j.memberExpression(firstKey, j.stringLiteral(key2), true);
-
-      path.replace(replacement);
-
+      path.replace(buildChainMember(object, [key1, key2]));
       return;
     }
 
@@ -302,7 +328,6 @@ module.exports = function transformer(file, api) {
 
   function transformReifiablyDeepPaths() {
     const info = analyzeThisProps();
-
     if (!info.definition) {
       return;
     }
