@@ -144,7 +144,15 @@ module.exports = function transformer(file, api) {
   }
 
   function isChainedCall(path) {
-    return path.parentPath.name === 'callee';
+    const parent = path.parentPath;
+    const parent2 = parent.parentPath;
+
+    return parent.name === 'callee' ||
+      parent.value.type === 'BinaryExpression' ||
+      (
+        (parent.name === 'left' || parent.name === 'right') &&
+         parent2.value.type === 'BinaryExpression'
+      );
   }
 
   function buildChainMember(context, pathParts) {

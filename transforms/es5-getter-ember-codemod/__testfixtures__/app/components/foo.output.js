@@ -7,5 +7,9 @@ export default Component.extend({
     this.foo.bar;
     this.get('foo.bar.baz');
     this.foo.bar.baz.bem.doSomething();
+    let a = this.foo.bar.baz + 1;
+    let b = 2 + this.foo.bar.baz;
+    this.foo.bar.baz + 1;
+    2 + this.foo.bar.baz;
   }
 });
