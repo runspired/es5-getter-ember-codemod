@@ -30,14 +30,14 @@ const OBJ_IGNORE_LIST = new Set([
 // the default export of "framework" classes like
 // Route/Controller/Component/Helper/Mixin etc.
 // TODO make configurable
-const SHOULD_TRANSFORM_KNOWN_THIS_PROPS = true;
+const SHOULD_TRANSFORM_KNOWN_THIS_PROPS = false;
 
 // depending on your browser support matrix this may require
 // adding a transform to your babel configuration
 // if this is false we use SHOULD_TRANSFORM_CHAINS_TO_DOT
 // to determine whether/how to transform chains.
 // TODO make configurable
-const SHOULD_TRANSFORM_CHAINS_TO_OPTIONAL = true;
+const SHOULD_TRANSFORM_CHAINS_TO_OPTIONAL = false;
 
 // A dangerous setting. Chains that cannot be detected
 // as "safe" will still be transformed to dot notation.
