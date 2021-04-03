@@ -11,5 +11,7 @@ export default Component.extend({
     let b = 2 + this.get('foo.bar.baz');
     this.get('foo.bar.baz') + 1;
     2 + this.get('foo.bar.baz');
+    this.get("audit.soldAmtList").length;
+    this.get("audit.soldAmtList")[0];
   }
 });

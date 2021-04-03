@@ -167,7 +167,7 @@ module.exports = function transformer(file, api) {
   function isChainedCall(path) {
     const parent = path.parentPath;
 
-    return parent.name === 'callee' ||
+    return parent.name === 'callee' || parent.value.type === 'MemberExpression' ||
       isConvertableBinary(path);
   }
 
