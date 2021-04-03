@@ -30,7 +30,7 @@ const OBJ_IGNORE_LIST = new Set([
 // the default export of "framework" classes like
 // Route/Controller/Component/Helper/Mixin etc.
 // TODO make configurable
-const SHOULD_TRANSFORM_KNOWN_THIS_PROPS = false;
+const SHOULD_TRANSFORM_KNOWN_THIS_PROPS = true;
 
 // depending on your browser support matrix this may require
 // adding a transform to your babel configuration
