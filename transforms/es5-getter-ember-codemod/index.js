@@ -26,6 +26,13 @@ const DEFAULT_EXPORTS_IN = [
   'app/serializers',
   'app/mixins',
 ];
+const PROP_ALLOW_LIST = new Set([
+  'auth',
+  'store',
+  'i18n',
+  'moneyUtils',
+  'loadingState',
+])
 const OBJ_IGNORE_LIST = new Set([
   '$',
 ]);
@@ -115,7 +122,7 @@ module.exports = function transformer(file, api) {
     if (isNestedKey(keyNode.value)) {
       let [key1, key2, ...pathParts] = keyNode.value.split('.');
 
-      if (!knownObjProps[key1] || pathParts.length) {
+      if ((!knownObjProps[key1] || pathParts.length) && !PROP_ALLOW_LIST.has(key1)) {
         return;
       }
 
