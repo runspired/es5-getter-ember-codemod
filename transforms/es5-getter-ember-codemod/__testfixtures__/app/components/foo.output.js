@@ -6,5 +6,6 @@ export default Component.extend({
   bar() {
     this.foo.bar;
     this.get('foo.bar.baz');
+    this.foo.bar.baz.bem.doSomething();
   }
 });

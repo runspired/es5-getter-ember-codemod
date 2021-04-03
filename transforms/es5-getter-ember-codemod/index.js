@@ -108,6 +108,21 @@ module.exports = function transformer(file, api) {
     return key.indexOf('.') !== -1;
   }
 
+  function isChainedCall(path) {
+    return path.parentPath.name === 'callee';
+  }
+
+  function buildChainMember(context, pathParts) {
+    let base = context;
+    for (let part of pathParts) {
+      let newNode = isValidIdentifier(part)
+      ? j.memberExpression(base, j.identifier(part))
+      : j.memberExpression(base,j.stringLiteral(part), true);
+      base = newNode;
+    }
+    return base;
+  }
+
   function performReplacement(path, keyIndex, object, knownObjProps = {}) {
     let keyNode = path.node.arguments[keyIndex];
 
@@ -121,6 +136,10 @@ module.exports = function transformer(file, api) {
 
     if (isNestedKey(keyNode.value)) {
       let [key1, key2, ...pathParts] = keyNode.value.split('.');
+      if (isChainedCall(path)) {
+        path.replace(buildChainMember(object, [key1, key2, ...pathParts]));
+        return;
+      }
 
       if ((!knownObjProps[key1] || pathParts.length) && !PROP_ALLOW_LIST.has(key1)) {
         return;
