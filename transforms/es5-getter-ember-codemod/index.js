@@ -18,6 +18,7 @@ const FRAMEWORK_CLASSES = new Set([
 ]);
 const DEFAULT_EXPORTS_IN = [
   'app/components',
+  'app/controllers',
   'app/routes',
   'app/models',
   'app/services',
@@ -25,6 +26,15 @@ const DEFAULT_EXPORTS_IN = [
   'app/adapters',
   'app/serializers',
   'app/mixins',
+  '/route.js',
+  '/controller.js',
+  '/component.js',
+  '/mixin.js',
+  '/model.js',
+  '/service.js',
+  '/adapter.js',
+  '/serializer.js',
+  '/transform.js',
 ];
 const PROP_ALLOW_LIST = new Set([
   'auth',
@@ -109,7 +119,7 @@ module.exports = function transformer(file, api) {
     if (file.path.includes('route')) {
       let nodes = root.find(j.ImportDeclaration, {
         source: {
-          value: '@ember/route/routing',
+          value: '@ember/routing/route',
         }
       });
       return nodes.length > 0;
@@ -148,7 +158,47 @@ module.exports = function transformer(file, api) {
     return base;
   }
 
-  function performReplacement(path, keyIndex, object, knownObjProps) {
+  function replaceChainPath(path, object, knownObjProps) {
+    let keyNode = path.node.arguments[0];
+
+    if (keyNode.type !== 'StringLiteral' && keyNode.type !== 'Literal') {
+      return;
+    }
+
+    if (typeof keyNode.value !== 'string') {
+      return;
+    }
+
+    if (!isNestedKey(keyNode.value)) {
+      return;
+    }
+
+    let [key1, key2, ...pathParts] = keyNode.value.split('.');
+
+    if (isChainedCall(path)) {
+      path.replace(buildChainMember(object, [key1, key2, ...pathParts]));
+      return;
+    }
+
+    if (pathParts.length) {
+      console.log('unable to replace long chain', key1, key2, pathParts);
+      return;
+    }
+
+    if (knownObjProps[key1] || PROP_ALLOW_LIST.has(key1)) {
+      path.replace(buildChainMember(object, [key1, key2]));
+      return;
+    }
+
+    if ((isRoute() && key1 === 'controller') || (isController() && key1 === 'model')) {
+      path.replace(buildChainMember(object, [key1, key2]));
+      return;
+    }
+
+    console.log('unable to replace chain', key1, key2, pathParts);
+  }
+
+  function performReplacement(path, keyIndex, object) {
     let keyNode = path.node.arguments[keyIndex];
 
     if (keyNode.type !== 'StringLiteral' && keyNode.type !== 'Literal') {
@@ -160,27 +210,6 @@ module.exports = function transformer(file, api) {
     }
 
     if (isNestedKey(keyNode.value)) {
-      let [key1, key2, ...pathParts] = keyNode.value.split('.');
-      if (isChainedCall(path)) {
-        path.replace(buildChainMember(object, [key1, key2, ...pathParts]));
-        return;
-      }
-
-      if ((!knownObjProps || !knownObjProps[key1] || pathParts.length) && !PROP_ALLOW_LIST.has(key1)) {
-        console.log(Object.keys(knownObjProps || {}));
-        if (
-          (pathParts.length === 0 && object.type === 'ThisExpression') &&
-          (
-            (isRoute() && key1 === 'controller') ||
-            (isController() && key1 === 'model')
-          )
-        ) {
-          path.replace(buildChainMember(object, [key1, key2]));
-        }
-        return;
-      }
-
-      path.replace(buildChainMember(object, [key1, key2]));
       return;
     }
 
@@ -347,7 +376,7 @@ module.exports = function transformer(file, api) {
       // that provide only 1 argument
       return args.length === 1;
     })
-    .forEach((path) => performReplacement(path, 0, j.thisExpression(), info.thisProps));
+    .forEach((path) => replaceChainPath(path, j.thisExpression(), info.thisProps));
   }
 
   transformThisExpression();
