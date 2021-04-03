@@ -1,21 +1,65 @@
 const { getParser } = require('codemod-cli').jscodeshift;
-const FRAMEWORK_CLASSES = new Set([
-  '@ember-data/serializer/transform',
-  '@ember-data/serializer/rest',
-  '@ember-data/serializer/json-api',
-  '@ember-data/store',
-  '@ember-data/model',
-  '@ember-data/adapter/rest',
-  '@ember-data/adapter/json-api',
-  '@ember/model',
-  '@ember/routing/route',
-  '@ember/service',
-  '@ember/controller',
-  '@ember/component',
-  '@ember/component/helper',
-  '@glimmer/component',
-  '@ember/object/mixin'
+
+// TODO make configurable
+// TODO make scoped to specific class types
+// If you commonly inject props throughout your app
+// via initializer, this adds them to the prop list
+// of "always defined" props on `this` for framework
+// classes.
+const PROP_ALLOW_LIST = new Set([
+  'auth',
+  'store',
+  'i18n',
+  'moneyUtils',
+  'loadingState',
 ]);
+
+// TODO make configurable
+// Allows specific object identifier names
+// to never be transformed away from .get
+// notation. Useful for native Map, WeakMap,
+// jQuery.get, Ember proxy instances etc.
+const OBJ_IGNORE_LIST = new Set([
+  '$',
+  'jQuery',
+]);
+
+// this is not necessarily safe if you use this
+// EmberObject.extend within a class definition
+// it scopes the transform to `this` usage within
+// the default export of "framework" classes like
+// Route/Controller/Component/Helper/Mixin etc.
+// TODO make configurable
+const SHOULD_TRANSFORM_KNOWN_THIS_PROPS = true;
+
+// depending on your browser support matrix this may require
+// adding a transform to your babel configuration
+// if this is false we use SHOULD_TRANSFORM_CHAINS_TO_DOT
+// to determine whether/how to transform chains.
+// TODO make configurable
+const SHOULD_TRANSFORM_CHAINS_TO_OPTIONAL = true;
+
+// A dangerous setting. Chains that cannot be detected
+// as "safe" will still be transformed to dot notation.
+// Only used if SHOULD_TRANSFORM_CHAINS_TO_OPTIONAL is false;
+// TODO make configurable
+const SHOULD_TRANSFORM_CHAINS_TO_DOT = false;
+
+const FRAMEWORK_CLASSES = {
+  'Transform': '@ember-data/serializer/transform',
+  'RESTSerializer': '@ember-data/serializer/rest',
+  'JSONAPISerializer': '@ember-data/serializer/json-api',
+  'Store': '@ember-data/store',
+  'Model': '@ember-data/model',
+  'RESTAdapter': '@ember-data/adapter/rest',
+  'JSONAPIAdapter': '@ember-data/adapter/json-api',
+  'Route': '@ember/routing/route',
+  'Service': '@ember/service',
+  'Controller': '@ember/controller',
+  'Component': ['@ember/component', '@glimmer/component'],
+  'Helper': '@ember/component/helper',
+  'Mixin': '@ember/object/mixin'
+};
 const DEFAULT_EXPORTS_IN = [
   'app/components',
   'app/controllers',
@@ -35,16 +79,27 @@ const DEFAULT_EXPORTS_IN = [
   '/adapter.js',
   '/serializer.js',
   '/transform.js',
+  '/route.ts',
+  '/controller.ts',
+  '/component.ts',
+  '/mixin.ts',
+  '/model.ts',
+  '/service.ts',
+  '/adapter.ts',
+  '/serializer.ts',
+  '/transform.ts',
 ];
-const PROP_ALLOW_LIST = new Set([
-  'auth',
-  'store',
-  'i18n',
-  'moneyUtils',
-  'loadingState',
-])
-const OBJ_IGNORE_LIST = new Set([
-  '$',
+const ALLOWED_BINARY_OPERATORS = new Set([
+  '+',
+  '-',
+  '/',
+  '*',
+  '%',
+  '**',
+]);
+const ALLOWED_IF_RIGHTHAND_OPERATOR = new Set([
+  'in',
+  'instanceof',
 ]);
 
 function isValidIdentifier(identifier) {
@@ -56,6 +111,7 @@ function isValidIdentifier(identifier) {
 module.exports = function transformer(file, api) {
   const j = getParser(api);
   const root = j(file.source);
+  const info = analyzeThisProps();
 
   function analyzeThisProps() {
     const thisProps = {};
@@ -119,7 +175,7 @@ module.exports = function transformer(file, api) {
     if (file.path.includes('route')) {
       let nodes = root.find(j.ImportDeclaration, {
         source: {
-          value: '@ember/routing/route',
+          value: FRAMEWORK_CLASSES['Route'],
         }
       });
       return nodes.length > 0;
@@ -131,7 +187,7 @@ module.exports = function transformer(file, api) {
     if (file.path.includes('controller')) {
       let nodes = root.find(j.ImportDeclaration, {
         source: {
-          value: '@ember/controller',
+          value: FRAMEWORK_CLASSES['Controller'],
         }
       });
       return nodes.length > 0;
@@ -143,18 +199,6 @@ module.exports = function transformer(file, api) {
     return key.indexOf('.') !== -1;
   }
 
-  const ALLOWED_BINARY_OPERATORS = new Set([
-    '+',
-    '-',
-    '/',
-    '*',
-    '%',
-    '**',
-  ]);
-  const ALLOWED_IF_RIGHTHAND_OPERATOR = new Set([
-    'in',
-    'instanceof',
-  ]);
   function isConvertableBinary(path) {
     const parent = path.parent;
     return parent.value.type === 'BinaryExpression' &&
@@ -171,25 +215,41 @@ module.exports = function transformer(file, api) {
       isConvertableBinary(path);
   }
 
-  function buildChainMember(context, pathParts) {
+  function buildChainMember(context, pathParts, optional = false) {
     let base = context;
+    let exprMethod = !optional ? 'memberExpression' : 'optionalMemberExpression';
+
     for (let part of pathParts) {
+      let method = base === context ? 'memberExpression' : exprMethod;
       let newNode = isValidIdentifier(part)
-      ? j.memberExpression(base, j.identifier(part))
-      : j.memberExpression(base,j.stringLiteral(part), true);
+        ? j[method](base, j.identifier(part))
+        : j[method](base, j.stringLiteral(part), true);
       base = newNode;
     }
+
     return base;
   }
 
-  function replaceChainPath(path, object, knownObjProps) {
-    let keyNode = path.node.arguments[0];
-
-    if (keyNode.type !== 'StringLiteral' && keyNode.type !== 'Literal') {
-      return;
+  function isMaybeReplaceable(node) {
+    if (node.type !== 'StringLiteral' && node.type !== 'Literal') {
+      return false;
     }
 
-    if (typeof keyNode.value !== 'string') {
+    if (typeof node.value !== 'string') {
+      return false;
+    }
+    return true;
+  }
+
+  function replaceChainPath(path, keyIndex, object, knownObjProps) {
+    let isThisExpression = object.type === 'ThisExpression';
+
+    if (!path.node.arguments) {
+      console.log(path);
+    }
+    let keyNode = path.node.arguments[keyIndex];
+
+    if (!isMaybeReplaceable(keyNode)) {
       return;
     }
 
@@ -205,31 +265,35 @@ module.exports = function transformer(file, api) {
     }
 
     if (pathParts.length) {
-      console.log('unable to replace long chain', key1, key2, pathParts);
+      if (SHOULD_TRANSFORM_CHAINS_TO_OPTIONAL) {
+        path.replace(buildChainMember(object, [key1, key2, ...pathParts], true));
+      } else if (SHOULD_TRANSFORM_CHAINS_TO_DOT) {
+        path.replace(buildChainMember(object, [key1, key2, ...pathParts], false));
+      }
       return;
     }
 
-    if (knownObjProps[key1] || PROP_ALLOW_LIST.has(key1)) {
+    if (isThisExpression && knownObjProps && (knownObjProps[key1] || PROP_ALLOW_LIST.has(key1))) {
       path.replace(buildChainMember(object, [key1, key2]));
       return;
     }
 
-    if ((isRoute() && key1 === 'controller') || (isController() && key1 === 'model')) {
+    if (isThisExpression && knownObjProps && ((isRoute() && key1 === 'controller') || (isController() && key1 === 'model'))) {
       path.replace(buildChainMember(object, [key1, key2]));
       return;
     }
 
-    console.log('unable to replace chain', key1, key2, pathParts);
+    if (SHOULD_TRANSFORM_CHAINS_TO_OPTIONAL) {
+      path.replace(buildChainMember(object, [key1, key2, ...pathParts], true));
+    } else if (SHOULD_TRANSFORM_CHAINS_TO_DOT) {
+      path.replace(buildChainMember(object, [key1, key2, ...pathParts], false));
+    }
   }
 
   function performReplacement(path, keyIndex, object) {
     let keyNode = path.node.arguments[keyIndex];
 
-    if (keyNode.type !== 'StringLiteral' && keyNode.type !== 'Literal') {
-      return;
-    }
-
-    if (typeof keyNode.value !== 'string') {
+    if (!isMaybeReplaceable(keyNode)) {
       return;
     }
 
@@ -322,7 +386,7 @@ module.exports = function transformer(file, api) {
       });
   }
 
-  function transformStandaloneGet() {
+  function transformStandaloneGet(scope = root, thisProps) {
     let hasGetImport = !!j(file.source).find(j.ImportDeclaration, {
       source: {
         value: '@ember/object'
@@ -337,26 +401,42 @@ module.exports = function transformer(file, api) {
       return;
     }
 
-    return root
+    return scope
       .find(j.CallExpression, {
         callee: {
           name: 'get'
         },
         arguments: [j.thisExpression]
       })
+      .filter(({ node: {arguments: args} }) => {
+        return args.length === 2;
+      })
       .forEach(function(path) {
-        let isNotThisExpression =
-          path.node.arguments[0].type !== 'ThisExpression';
-        if (isNotThisExpression) {
+        let obj = path.node.arguments[0];
+        if (obj.type !== 'ThisExpression' && obj.type !== 'Identifier') {
+          console.log(`Unable to process get() call on `, obj);
           return;
         }
 
-        performReplacement(path, 1, j.thisExpression());
+        if (thisProps && obj.type !== 'ThisExpression') {
+          return;
+        }
+
+        let keyNode = path.node.arguments[1]
+        if (!isMaybeReplaceable(keyNode)) {
+          return;
+        }
+
+        if (isNestedKey(keyNode.value)) {
+          replaceChainPath(path, 1, obj, thisProps);
+        } else {
+          performReplacement(path, 1, obj);
+        }
       });
   }
 
-  function transformEmberDotGet() {
-    return root
+  function transformEmberDotGet(scope = root, thisProps) {
+    return scope
       .find(j.CallExpression, {
         callee: {
           object: {
@@ -368,27 +448,61 @@ module.exports = function transformer(file, api) {
         },
         arguments: [j.thisExpression]
       })
+      .filter(({ node: {arguments: args} }) => {
+        return args.length === 2;
+      })
       .forEach(function(path) {
-        let isNotThisExpression =
-          path.node.arguments[0].type !== 'ThisExpression';
-        if (isNotThisExpression) {
+        let obj = path.node.arguments[0];
+        if (obj.type !== 'ThisExpression' && obj.type !== 'Identifier') {
+          console.log(`Unable to process Ember.get call on `, obj);
           return;
         }
 
-        performReplacement(path, 1, j.thisExpression());
+        if (thisProps && obj.type !== 'ThisExpression') {
+          return;
+        }
+
+        let keyNode = path.node.arguments[1]
+        if (!isMaybeReplaceable(keyNode)) {
+          return;
+        }
+
+        if (isNestedKey(keyNode.value)) {
+          replaceChainPath(path, 1, obj, thisProps);
+        } else {
+          performReplacement(path, 1, obj);
+        }
       });
   }
 
   function transformReifiablyDeepPaths() {
-    const info = analyzeThisProps();
-    if (!info.definition) {
-      return;
+    if (SHOULD_TRANSFORM_KNOWN_THIS_PROPS) {
+      if (info.definition) {
+        const scope = j(info.definition);
+        transformStandaloneGet(scope, info.thisProps);
+        transformEmberDotGet(scope, info.thisProps);
+        scope.find(j.CallExpression, {
+          callee: {
+            object: {
+              type: 'ThisExpression'
+            },
+            property: {
+              name: 'get'
+            }
+          }
+        })
+        .filter(({ node: {arguments: args} }) => {
+          // mirage or pretender stubs pass multiple arguments to
+          // this.get, so we restrict transformation to get invocations
+          // that provide only 1 argument
+          return args.length === 1;
+        })
+        .forEach((path) => replaceChainPath(path, 0, path.node.callee.object, info.thisProps));
+      }
     }
-    j(info.definition).find(j.CallExpression, {
+
+    root.find(j.CallExpression, {
       callee: {
-        object: {
-          type: 'ThisExpression'
-        },
         property: {
           name: 'get'
         }
@@ -400,7 +514,8 @@ module.exports = function transformer(file, api) {
       // that provide only 1 argument
       return args.length === 1;
     })
-    .forEach((path) => replaceChainPath(path, j.thisExpression(), info.thisProps));
+    .forEach((path) => replaceChainPath(path, 0, path.node.callee.object));
+
   }
 
   transformThisExpression();
