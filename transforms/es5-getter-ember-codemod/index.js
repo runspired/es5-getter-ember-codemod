@@ -1,25 +1,31 @@
 const { getParser } = require('codemod-cli').jscodeshift;
-const OBJ_ALLOWLIST = new Set([
-  'acc',
-  'buyer',
-  'record',
-  'bill',
-  'list',
-  'user',
-  'store',
-  'b',
-  'acctGlMapping',
-  'item',
-  'tax',
-  'acctTaxMapping',
-  'selectedMenuTemplate',
-  'selectedMenu',
-  'template',
-  'styleSelection',
+const FRAMEWORK_CLASSES = new Set([
+  '@ember-data/serializer/transform',
+  '@ember-data/serializer/rest',
+  '@ember-data/serializer/json-api',
+  '@ember-data/store',
+  '@ember-data/model',
+  '@ember-data/adapter/rest',
+  '@ember-data/adapter/json-api',
+  '@ember/model',
+  '@ember/routing/route',
+  '@ember/service',
+  '@ember/controller',
+  '@ember/component',
+  '@ember/component/helper',
+  '@glimmer/component',
+  '@ember/object/mixin'
 ]);
-const PROP_ALLOWLIST = new Set([
-  'length'
-]);
+const DEFAULT_EXPORTS_IN = [
+  'app/components',
+  'app/routes',
+  'app/models',
+  'app/services',
+  'app/transforms',
+  'app/adapters',
+  'app/serializers',
+  'app/mixins',
+];
 const OBJ_IGNORE_LIST = new Set([
   '$',
 ]);
@@ -34,18 +40,85 @@ module.exports = function transformer(file, api) {
   const j = getParser(api);
   const root = j(file.source);
 
+  function analyzeThisProps() {
+    const thisProps = {};
+    let definition;
+    let useDefaultExport = DEFAULT_EXPORTS_IN.find(v => file.path.includes(v));
+    if (!useDefaultExport) {
+      return thisProps;
+    }
+
+    root.find(j.ExportDefaultDeclaration)
+      .forEach(path => {
+        let exp;
+        if (path.value.declaration.type === 'Identifier') {
+          let declaration;
+          path.parentPath.value.forEach(n => {
+            if (n.type === 'VariableDeclaration') {
+              let dec = n.declarations.find(d => {
+                return d.id.name === 'foo';
+              });
+              if (dec) { declaration = dec; }
+            }
+          });
+          exp = declaration.init;
+        } else {
+          exp = path.value.declaration;
+        }
+        if (exp.type === 'CallExpression') {
+          exp = exp.arguments[0].properties;
+        } else if (exp.type === 'ClassDeclaration') {
+          exp = exp.body.body;
+        } else {
+          return;
+        }
+        // collect props from body
+        definition = exp;
+        exp.forEach(n => {
+          let key = n.key.name;
+          let valueType = n.value ? n.value.type : (n.body ? n.body.type : null);
+
+          if (valueType && valueType !== 'Literal') {
+            thisProps[key] = n;
+          }
+        });
+      });
+
+    return { definition, thisProps };
+  }
+
   function isNestedKey(key) {
     return key.indexOf('.') !== -1;
   }
 
-  function performReplacement(path, keyIndex, object) {
+  function performReplacement(path, keyIndex, object, knownObjProps = {}) {
     let keyNode = path.node.arguments[keyIndex];
 
     if (keyNode.type !== 'StringLiteral' && keyNode.type !== 'Literal') {
       return;
     }
 
-    if (typeof keyNode.value !== 'string' || isNestedKey(keyNode.value)) {
+    if (typeof keyNode.value !== 'string') {
+      return;
+    }
+
+    if (isNestedKey(keyNode.value)) {
+      let [key1, key2, ...pathParts] = keyNode.value.split('.');
+
+      if (!knownObjProps[key1] || pathParts.length) {
+        return;
+      }
+
+      let firstKey = isValidIdentifier(key1)
+        ? j.memberExpression(object, j.identifier(key1))
+        : j.memberExpression(object,j.stringLiteral(key1), true);
+
+      let replacement = isValidIdentifier(key2)
+        ? j.memberExpression(firstKey, j.identifier(key2))
+        : j.memberExpression(firstKey, j.stringLiteral(key2), true);
+
+      path.replace(replacement);
+
       return;
     }
 
@@ -91,6 +164,9 @@ module.exports = function transformer(file, api) {
           return;
         }
         if (path.node.callee.object.type === 'ThisExpression') {
+          return;
+        }
+        if (path.node.arguments.length > 1) {
           return;
         }
         performReplacement(path, 0, path.node.callee.object)
@@ -188,6 +264,31 @@ module.exports = function transformer(file, api) {
       });
   }
 
+  function transformReifiablyDeepPaths() {
+    const info = analyzeThisProps();
+
+    if (!info.definition) {
+      return;
+    }
+    j(info.definition).find(j.CallExpression, {
+      callee: {
+        object: {
+          type: 'ThisExpression'
+        },
+        property: {
+          name: 'get'
+        }
+      }
+    })
+    .filter(({ node: {arguments: args} }) => {
+      // mirage or pretender stubs pass multiple arguments to
+      // this.get, so we restrict transformation to get invocations
+      // that provide only 1 argument
+      return args.length === 1;
+    })
+    .forEach((path) => performReplacement(path, 0, j.thisExpression(), info.thisProps));
+  }
+
   transformThisExpression();
 
   transformGetOnObjects();
@@ -197,6 +298,8 @@ module.exports = function transformer(file, api) {
   transformStandaloneGet();
 
   transformEmberDotGet();
+
+  transformReifiablyDeepPaths();
 
   return root.toSource();
 };
