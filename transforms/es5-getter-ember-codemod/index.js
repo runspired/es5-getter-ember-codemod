@@ -215,12 +215,31 @@ module.exports = function transformer(file, api) {
       isConvertableBinary(path);
   }
 
-  function buildChainMember(context, pathParts, optional = false) {
-    let base = context;
-    let exprMethod = !optional ? 'memberExpression' : 'optionalMemberExpression';
+  function buildChainMember(obj, pathParts, options, optional = false) {
+    let base = obj;
+    const exprMethod = !optional ? 'memberExpression' : 'optionalMemberExpression';
+    const prop0 = pathParts[0];
 
-    for (let part of pathParts) {
-      let method = base === context ? 'memberExpression' : exprMethod;
+    for (let i = 0; i < pathParts.length; i++) {
+      let part = pathParts[i];
+      let method = exprMethod;
+
+      if (
+        base === obj ||
+        (
+          options.isThisExpression &&
+          i === 1 &&
+          (
+            PROP_ALLOW_LIST.has( prop0) ||
+            options.knownProps[ prop0] ||
+            (options.isRoute &&  prop0 === 'controller') ||
+            (options.isController &&  prop0 === 'model')
+          )
+        )
+      ) {
+        method = 'memberExpression';
+      }
+
       let newNode = isValidIdentifier(part)
         ? j[method](base, j.identifier(part))
         : j[method](base, j.stringLiteral(part), true);
@@ -243,10 +262,13 @@ module.exports = function transformer(file, api) {
 
   function replaceChainPath(path, keyIndex, object, knownObjProps) {
     let isThisExpression = object.type === 'ThisExpression';
+    const C = {
+      knownProps: knownObjProps || {},
+      isThisExpression,
+      isRoute: isRoute(),
+      isController: isController(),
+    };
 
-    if (!path.node.arguments) {
-      console.log(path);
-    }
     let keyNode = path.node.arguments[keyIndex];
 
     if (!isMaybeReplaceable(keyNode)) {
@@ -260,33 +282,33 @@ module.exports = function transformer(file, api) {
     let [key1, key2, ...pathParts] = keyNode.value.split('.');
 
     if (isChainedCall(path)) {
-      path.replace(buildChainMember(object, [key1, key2, ...pathParts]));
+      path.replace(buildChainMember(object, [key1, key2, ...pathParts], C, false));
       return;
     }
 
     if (pathParts.length) {
       if (SHOULD_TRANSFORM_CHAINS_TO_OPTIONAL) {
-        path.replace(buildChainMember(object, [key1, key2, ...pathParts], true));
+        path.replace(buildChainMember(object, [key1, key2, ...pathParts], C, true));
       } else if (SHOULD_TRANSFORM_CHAINS_TO_DOT) {
-        path.replace(buildChainMember(object, [key1, key2, ...pathParts], false));
+        path.replace(buildChainMember(object, [key1, key2, ...pathParts], C, false));
       }
       return;
     }
 
     if (isThisExpression && knownObjProps && (knownObjProps[key1] || PROP_ALLOW_LIST.has(key1))) {
-      path.replace(buildChainMember(object, [key1, key2]));
+      path.replace(buildChainMember(object, [key1, key2], C, false));
       return;
     }
 
-    if (isThisExpression && knownObjProps && ((isRoute() && key1 === 'controller') || (isController() && key1 === 'model'))) {
-      path.replace(buildChainMember(object, [key1, key2]));
+    if (isThisExpression && knownObjProps && ((C.isRoute && key1 === 'controller') || (C.isController && key1 === 'model'))) {
+      path.replace(buildChainMember(object, [key1, key2], C, false));
       return;
     }
 
     if (SHOULD_TRANSFORM_CHAINS_TO_OPTIONAL) {
-      path.replace(buildChainMember(object, [key1, key2, ...pathParts], true));
+      path.replace(buildChainMember(object, [key1, key2, ...pathParts], C, true));
     } else if (SHOULD_TRANSFORM_CHAINS_TO_DOT) {
-      path.replace(buildChainMember(object, [key1, key2, ...pathParts], false));
+      path.replace(buildChainMember(object, [key1, key2, ...pathParts], C, false));
     }
   }
 
