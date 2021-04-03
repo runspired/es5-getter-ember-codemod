@@ -143,16 +143,32 @@ module.exports = function transformer(file, api) {
     return key.indexOf('.') !== -1;
   }
 
+  const ALLOWED_BINARY_OPERATORS = new Set([
+    '+',
+    '-',
+    '/',
+    '*',
+    '%',
+    '**',
+  ]);
+  const ALLOWED_IF_RIGHTHAND_OPERATOR = new Set([
+    'in',
+    'instanceof',
+  ]);
+  function isConvertableBinary(path) {
+    const parent = path.parent;
+    return parent.value.type === 'BinaryExpression' &&
+      (
+        ALLOWED_BINARY_OPERATORS.has(parent.value.operator) ||
+        path.name === 'right' && ALLOWED_IF_RIGHTHAND_OPERATOR.has(parent.value.operator)
+      );
+  }
+
   function isChainedCall(path) {
     const parent = path.parentPath;
-    const parent2 = parent.parentPath;
 
     return parent.name === 'callee' ||
-      parent.value.type === 'BinaryExpression' ||
-      (
-        (parent.name === 'left' || parent.name === 'right') &&
-         parent2.value.type === 'BinaryExpression'
-      );
+      isConvertableBinary(path);
   }
 
   function buildChainMember(context, pathParts) {
