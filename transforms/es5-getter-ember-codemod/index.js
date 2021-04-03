@@ -66,22 +66,32 @@ module.exports = function transformer(file, api) {
           exp = path.value.declaration;
         }
         if (exp.type === 'CallExpression') {
-          exp = exp.arguments[0].properties;
+          definition = exp;
+          exp.arguments.forEach(a => {
+            if (a.type === 'ObjectExpression') {
+              a.properties.forEach(n => {
+                let key = n.key.name;
+                let valueType = n.value ? n.value.type : (n.body ? n.body.type : null);
+
+                if (valueType && valueType !== 'Literal') {
+                  thisProps[key] = n;
+                }
+              });
+            }
+          });
         } else if (exp.type === 'ClassDeclaration') {
-          exp = exp.body.body;
+          definition = exp;
+          exp.body.body.forEach(n => {
+            let key = n.key.name;
+            let valueType = n.value ? n.value.type : (n.body ? n.body.type : null);
+
+            if (valueType && valueType !== 'Literal') {
+              thisProps[key] = n;
+            }
+          });
         } else {
           return;
         }
-        // collect props from body
-        definition = exp;
-        exp.forEach(n => {
-          let key = n.key.name;
-          let valueType = n.value ? n.value.type : (n.body ? n.body.type : null);
-
-          if (valueType && valueType !== 'Literal') {
-            thisProps[key] = n;
-          }
-        });
       });
 
     return { definition, thisProps };
