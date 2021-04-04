@@ -37,7 +37,7 @@ const SHOULD_TRANSFORM_KNOWN_THIS_PROPS = true;
 // if this is false we use SHOULD_TRANSFORM_CHAINS_TO_DOT
 // to determine whether/how to transform chains.
 // TODO make configurable
-const SHOULD_TRANSFORM_CHAINS_TO_OPTIONAL = false;
+const SHOULD_TRANSFORM_CHAINS_TO_OPTIONAL = true;
 
 // A dangerous setting. Chains that cannot be detected
 // as "safe" will still be transformed to dot notation.
